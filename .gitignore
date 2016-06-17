@@ -3,3 +3,8 @@
 ################################################################################
 
 /FLIFImageViewer/bin
+/FLIFImageViewer/obj
+/FLIFNet/bin
+/FLIFNet/obj
+/.vs/FLIFNet/v14
+/bin
