@@ -30,31 +30,22 @@ namespace FLIFNetWrapper
     {
         public readonly static Version LibraryVersion = new Version(0, 1);
 
-        internal struct FLIF_DECODER
-        {
-            Int32 quality;
-            UInt32 scale;
-            delegate void callback();
-            Int32 first_quality;
-            UInt32 rw;
-            UInt32 rh;
-            Int32 crc_check;
-        }
-
         public class FlifImage
         {
             private byte[] imageData = null;
             private uint width, height;
+            private IntPtr d;
 
             public uint Width { get { return width; } }
             public uint Height { get { return height; } }
 
             public byte[] ImageData { get { return imageData; } }
 
-            internal FlifImage(out FLIF_DECODER decoder, uint index)
+            internal FlifImage(IntPtr decoder, uint index)
             {
-                IntPtr decoded = flif_decoder_get_image(out decoder, new UIntPtr(index));
-                
+                IntPtr decoded = flif_decoder_get_image(decoder, new UIntPtr(index));
+                d = decoded;
+
                 width = flif_image_get_width(decoded);
                 height = flif_image_get_height(decoded);
 
@@ -62,31 +53,43 @@ namespace FLIFNetWrapper
                 byte[] rowBuffer = new byte[width * 4];
                 for (int i = 0; i < height; i++)
                 {
-                    flif_image_read_row_RGBA8(decoded, (uint)i, rowBuffer, new UIntPtr((uint)rowBuffer.Length));
+                    flif_image_read_row_RGBA8(decoded, (uint)i, rowBuffer, rowBuffer.Length);
                     Array.Copy(rowBuffer, 0, imageBuffer, i * rowBuffer.Length, rowBuffer.Length);
                 }
-                flif_destroy_image(decoded);
 
                 imageData = imageBuffer;
             }
 
-            public static byte[] RGBA2BGRA(byte[] imageData)
+            public void Free()
             {
-                byte[] buffer = new byte[imageData.Length];
-                for (int i = 0; i < imageData.Length; i += 4)
+                if (d != IntPtr.Zero)
                 {
-                    buffer[i] = imageData[i + 2];
-                    buffer[i + 1] = imageData[i + 1];
-                    buffer[i + 2] = imageData[i];
-                    buffer[i + 3] = imageData[i + 3];
+                    flif_destroy_image(d);
+                    d = IntPtr.Zero;
                 }
-                return buffer;
+                
             }
         }
 
         public class FlifDecoder
         {
-            private FLIFNet.FLIF_DECODER decoder;
+            private IntPtr decoder;
+            private event FLIFNet.QualityReachedCallback _OnQualityReached = null;
+
+            public event FLIFNet.QualityReachedCallback OnQualityReached
+            {
+                add
+                {
+                    _OnQualityReached = value;
+                    FLIFNet.flif_decoder_set_callback(decoder, _OnQualityReached);
+                }
+
+                remove
+                {
+                    _OnQualityReached = null;
+                    FLIFNet.flif_decoder_set_callback(decoder, _OnQualityReached);
+                }
+            }
 
             public FlifDecoder()
             {
@@ -94,37 +97,38 @@ namespace FLIFNetWrapper
                 {
                     decoder = FLIFNet.flif_create_decoder();
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    throw;
+                    throw ex;
                 }
-                
             }
-
+            
             ~FlifDecoder()
             {
                 try
                 {
-                    Abort();
-                    FLIFNet.flif_destroy_decoder(out decoder);
+                    if (decoder != IntPtr.Zero)
+                    {
+                        FLIFNet.flif_destroy_decoder(decoder);
+                        decoder = IntPtr.Zero;
+                    }
+                    
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-
-                    throw;
                 }
-                
             }
+            
 
             public int Abort()
             {
                 try
                 {
-                    return flif_abort_decoder(out decoder);
+                    return flif_abort_decoder(decoder);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    throw;
+                    throw ex;
                 }
             }
 
@@ -132,11 +136,11 @@ namespace FLIFNetWrapper
             {
                 try
                 {
-                    return flif_decoder_decode_file(out decoder, filename);
+                    return flif_decoder_decode_file(decoder, filename);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    throw;
+                    throw ex;
                 }
             }
 
@@ -144,11 +148,11 @@ namespace FLIFNetWrapper
             {
                 try
                 {
-                    return flif_decoder_decode_memory(out decoder, out buffer, new UIntPtr((uint)buffer.Length));
+                    return flif_decoder_decode_memory(decoder, buffer, buffer.Length);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    throw;
+                    throw ex;
                 }
             }
 
@@ -156,11 +160,11 @@ namespace FLIFNetWrapper
             {
                 try
                 {
-                    flif_decoder_set_quality(out decoder, quality);
+                    flif_decoder_set_quality(decoder, quality);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    throw;
+                    throw ex;
                 }
             }
 
@@ -168,11 +172,11 @@ namespace FLIFNetWrapper
             {
                 try
                 {
-                    flif_decoder_set_scale(out decoder, scale);
+                    flif_decoder_set_scale(decoder, scale);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    throw;
+                    throw ex;
                 }
             }
 
@@ -180,40 +184,74 @@ namespace FLIFNetWrapper
             {
                 try
                 {
-                    return new FlifImage(out decoder, index);
+                    return new FlifImage(decoder, index);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    throw;
+                    throw ex;
                 }
             }
+
+            public void SetFirstCallbackQuality(int quality)
+            {
+                try
+                {
+                    FLIFNet.flif_decoder_set_first_callback_quality(decoder, quality);
+                }
+                catch (Exception ex)
+                {
+                    throw ex;
+                }
+            }
+
+        //    public void SetCallback()
         }
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public delegate int QualityReachedCallback(Int32 quality, Int64 bytes_read);
 
         //FLIF decoder
         [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-        internal static extern FLIF_DECODER flif_create_decoder();
+        internal static extern IntPtr flif_create_decoder();
 
         [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-        internal static extern void flif_destroy_decoder(out FLIF_DECODER decoder);
+        internal static extern Int32 flif_decoder_num_images(IntPtr decoder);
 
         [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-        internal static extern Int32 flif_abort_decoder(out FLIF_DECODER decoder);
+        internal static extern Int32 flif_decoder_num_loops(IntPtr decoder);
 
         [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-        internal static extern Int32 flif_decoder_decode_file(out FLIF_DECODER decoder, string filename);
+        internal static extern void flif_destroy_decoder(IntPtr decoder);
 
         [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-        internal static extern Int32 flif_decoder_decode_memory(out FLIF_DECODER decoder, out byte[] buffer, UIntPtr buffer_size_bytes);
+        internal static extern Int32 flif_abort_decoder(IntPtr decoder);
 
         [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-        internal static extern void flif_decoder_set_quality(out FLIF_DECODER decoder, Int32 quality);    
+        internal static extern Int32 flif_decoder_decode_file(IntPtr decoder, string filename);
 
         [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-        internal static extern void flif_decoder_set_scale(out FLIF_DECODER decoder, UInt32 scale);
+        internal static extern Int32 flif_decoder_decode_memory(IntPtr decoder, byte[] buffer, Int32 buffer_size_bytes);
 
         [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-        internal static extern IntPtr flif_decoder_get_image(out FLIF_DECODER decoder, UIntPtr  index);
+        internal static extern void flif_decoder_set_quality(IntPtr decoder, Int32 quality);    
 
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_decoder_set_scale(IntPtr decoder, UInt32 scale);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_decoder_set_crc_check(IntPtr decoder, Int32 crc_check);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_decoder_set_resize(IntPtr decoder, UInt32 width, UInt32 height);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern IntPtr flif_decoder_get_image(IntPtr decoder, UIntPtr  index);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_decoder_set_callback(IntPtr decoder, [MarshalAs(UnmanagedType.FunctionPtr)] QualityReachedCallback report_status_callback);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_decoder_set_first_callback_quality(IntPtr decoder, Int32 quality);
 
         //FLIF common
         [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
@@ -226,7 +264,72 @@ namespace FLIFNetWrapper
         internal static extern void flif_destroy_image(IntPtr image);
 
         [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-        internal static extern void flif_image_read_row_RGBA8(IntPtr image, UInt32 row, byte[] buffer, UIntPtr buffer_size_bytes);
+        internal static extern void flif_image_read_row_RGBA8(IntPtr image, UInt32 row, byte[] buffer, Int32 buffer_size_bytes);
+
+        //FLIF decoder
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern IntPtr flif_create_encoder();
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_add_image(IntPtr encoder, IntPtr image);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern Int32 flif_encoder_encode_file(IntPtr encoder, string filename);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern Int32 flif_encoder_encode_memory(IntPtr encoder, ref IntPtr buffer, Int32 buffer_size_bytes);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_destroy_encoder(IntPtr encoder);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_interlaced(IntPtr encoder, UInt32 interlaced);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_learn_repeat(IntPtr encoder, UInt32 learn_repeats);
+
+
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_auto_color_buckets(IntPtr encoder, UInt32 acb);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_palette_size(IntPtr encoder, Int32 palette_size);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_lookback(IntPtr encoder, Int32 lookback);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_divisor(IntPtr encoder, Int32 divisor);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_min_size(IntPtr encoder, Int32 min_size);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_split_threshold(IntPtr encoder, Int32 threshold);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_alpha_zero_lossless(IntPtr encoder);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_chance_cutoff(IntPtr encoder, Int32 cutoff);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_chance_alpha(IntPtr encoder, Int32 alpha);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_crc_check(IntPtr encoder, UInt32 crc_check);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_channel_compact(IntPtr encoder, UInt32 plc);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_ycocg(IntPtr encoder, UInt32 ycocg);
+
+        [DllImport("libflif.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        internal static extern void flif_encoder_set_frame_shape(IntPtr encoder, UInt32 frs);
+
+
     }
 
 

@@ -49,45 +49,59 @@ namespace FLIFImageViewer
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
-            // Create OpenFileDialog 
-            Microsoft.Win32.OpenFileDialog dlg = new Microsoft.Win32.OpenFileDialog();
-
-            // Set filter for file extension and default file extension 
-            dlg.DefaultExt = ".flif";
-            dlg.Filter = "Free Lossless Image Format files (*.flif)|*.flif";
-
-            Nullable<bool> result = dlg.ShowDialog();
-            if (result == true)
+            string[] args = Environment.GetCommandLineArgs();
+            string filename = null;
+            if (args.Length > 1)
             {
-                LoadImage(dlg.FileName);
+                filename = args[1];
             }
             else
             {
-                this.Close();
+                // Create OpenFileDialog 
+                Microsoft.Win32.OpenFileDialog dlg = new Microsoft.Win32.OpenFileDialog();
+
+                // Set filter for file extension and default file extension 
+                dlg.DefaultExt = ".flif";
+                dlg.Filter = "Free Lossless Image Format files (*.flif)|*.flif";
+
+                Nullable<bool> result = dlg.ShowDialog();
+                if (result == true)
+                {
+                    filename = dlg.FileName;
+                }
+                else
+                {
+                    this.Close();
+                }
             }
+
+            LoadImage(filename);
         }
 
         private void LoadImage(string filename)
         {
-            //Load image
+            //Decode file
             FLIFNet.FlifDecoder Decoder = new FLIFNet.FlifDecoder();
             Decoder.SetQuality(100);
             Decoder.SetScale(1);
             int res = Decoder.DecodeFile(filename);
-            Console.WriteLine(res.ToString());
+            if (res == 0)
+            {
+                MessageBox.Show("File decoding error!", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            //Get image
             FLIFNet.FlifImage Image = Decoder.GetImage(0);
 
             //Draw
-            WriteableBitmap wb = new WriteableBitmap((int)Image.Width, (int)Image.Height, 96, 96, PixelFormats.Bgra32, null);
-            Int32Rect _rect = new Int32Rect(0, 0, wb.PixelWidth, wb.PixelHeight);
-            int _bytesPerPixel = (wb.Format.BitsPerPixel + 7) / 8;
-            int _stride = wb.PixelWidth * _bytesPerPixel;
+            image.Source = Image.GetWritableBitmap();
 
-            wb.WritePixels(_rect, FLIFNet.FlifImage.RGBA2BGRA(Image.ImageData), _stride, 0);
-            image.Source = wb;
-
+            //Resize window
             this.Width = Image.Width;
             this.Height = Image.Height;
+            this.Left = 0;
+            this.Top = 0;
         }
     }
 }
